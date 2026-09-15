@@ -6736,6 +6736,7 @@ function switchAuthTab(tab){
   document.getElementById("authView-signup").style.display = tab==="signup" ? "block" : "none";
   document.getElementById("authView-forgot").style.display = "none";
   document.getElementById("authView-pending").style.display = "none";
+  document.getElementById("authView-verify").style.display = "none";
   ["loginErr","signupErr","forgotErr"].forEach(id=>{ const el=document.getElementById(id); if(el) el.textContent=""; });
   document.querySelectorAll(".auth-field.has-error").forEach(f=> f.classList.remove("has-error"));
   const banner = document.getElementById("forgotBanner"); if(banner) banner.style.display = "none";
@@ -6763,6 +6764,17 @@ function showPendingView(){
   document.getElementById("authView-signup").style.display = "none";
   document.getElementById("authView-forgot").style.display = "none";
   document.getElementById("authView-pending").style.display = "block";
+  document.getElementById("authView-verify").style.display = "none";
+}
+function showVerifyView(fbUser){
+  document.querySelectorAll(".auth-tab").forEach(b=> b.classList.remove("active"));
+  document.getElementById("authView-login").style.display = "none";
+  document.getElementById("authView-signup").style.display = "none";
+  document.getElementById("authView-forgot").style.display = "none";
+  document.getElementById("authView-pending").style.display = "none";
+  document.getElementById("authView-verify").style.display = "block";
+  document.getElementById("verifyEmailLabel").textContent = fbUser.email || "your email address";
+  document.getElementById("verifyErr").textContent = "";
 }
 document.querySelectorAll(".auth-tab").forEach(b=> b.addEventListener("click", ()=> switchAuthTab(b.dataset.authTab)));
 document.getElementById("gotoSignup").addEventListener("click", e=>{ e.preventDefault(); switchAuthTab("signup"); });
@@ -6819,6 +6831,14 @@ async function handleAuthenticatedUser(fbUser){
   }
   AUTH_SESSION = { id: fbUser.uid, uid: fbUser.uid, name: profile.name, email: profile.email, role: profile.role };
 
+  const usesEmailPassword = fbUser.providerData.some(provider=>provider.providerId === "password");
+  if(usesEmailPassword && !fbUser.emailVerified){
+    document.getElementById("authScreen").style.display = "flex";
+    document.getElementById("appRoot").classList.remove("authed");
+    showVerifyView(fbUser);
+    return;
+  }
+
   if(AUTH_SESSION.role !== "admin"){
     document.getElementById("authScreen").style.display = "flex";
     document.getElementById("appRoot").classList.remove("authed");
@@ -6851,6 +6871,12 @@ async function handleAuthenticatedUser(fbUser){
   if(typeof ATLASTour !== "undefined") ATLASTour.maybeOfferOnLogin();
   if(WELCOME_TOAST_MESSAGE){ showToast(WELCOME_TOAST_MESSAGE); WELCOME_TOAST_MESSAGE = null; }
 }
+
+// Keep the Firebase session across refreshes and browser restarts. The user
+// still controls the session with the explicit Log Out action.
+firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(error=>{
+  console.warn("Could not enable persistent Firebase session:", error);
+});
 
 firebase.auth().onAuthStateChanged(async (fbUser)=>{
   try{
@@ -6912,8 +6938,10 @@ document.getElementById("signupBtn").addEventListener("click", async ()=>{
     const cred = await firebase.auth().createUserWithEmailAndPassword(email, password);
     await cred.user.updateProfile({ displayName: name });
     const nowIso = new Date().toISOString();
-    await createUserProfileDoc(cred.user.uid, { name, email, role:"pending", accountType:"email", createdAt: nowIso, updatedAt: nowIso });
-    WELCOME_TOAST_MESSAGE = `Account created. Welcome, ${name}.`;
+    const verificationProfile = { name, email, role:"pending", accountType:"email", createdAt: nowIso, updatedAt: nowIso, verificationLastSentAt:nowIso, verificationAttempts:0 };
+    await createUserProfileDoc(cred.user.uid, verificationProfile);
+    await cred.user.sendEmailVerification();
+    WELCOME_TOAST_MESSAGE = `Account created. A verification link was sent to ${email}.`;
   }catch(e){
     if(e.code==="auth/email-already-in-use"){ errEl.textContent = "An account with that email already exists. Try logging in instead."; setFieldError("signupEmail", true); }
     else if(e.code==="auth/weak-password"){ errEl.textContent = "Password is too weak. Please choose a stronger password."; setFieldError("signupPassword", true); }
@@ -6975,6 +7003,51 @@ async function handleGoogleSignIn(){
 });
 
 document.getElementById("pendingLogoutBtn").addEventListener("click", ()=> firebase.auth().signOut());
+document.getElementById("verifyLogoutBtn").addEventListener("click", ()=> firebase.auth().signOut());
+
+const VERIFY_DELAYS_MS = [3*60*1000, 5*60*1000, 10*60*1000, 15*60*1000, 30*60*1000, 10*60*60*1000];
+let VERIFY_USER = null;
+function verificationCooldown(profile){
+  const attempts = Math.max(0, Number(profile && profile.verificationAttempts) || 0);
+  const sentAt = Date.parse(profile && profile.verificationLastSentAt || "") || 0;
+  const wait = VERIFY_DELAYS_MS[Math.min(attempts, VERIFY_DELAYS_MS.length-1)] || VERIFY_DELAYS_MS[VERIFY_DELAYS_MS.length-1];
+  return Math.max(0, sentAt + wait - Date.now());
+}
+async function sendVerificationLink(user, profile, force){
+  const remaining = force ? 0 : verificationCooldown(profile);
+  if(remaining>0) throw new Error("Please wait "+Math.ceil(remaining/60000)+" minute(s) before requesting another verification link.");
+  await user.sendEmailVerification();
+  const next = {
+    verificationLastSentAt:new Date().toISOString(),
+    verificationAttempts:(Number(profile && profile.verificationAttempts)||0)+1,
+    updatedAt:new Date().toISOString()
+  };
+  await createUserProfileDoc(user.uid, next);
+  return next;
+}
+document.getElementById("refreshVerifyBtn").addEventListener("click", async ()=>{
+  const btn = document.getElementById("refreshVerifyBtn");
+  btn.disabled = true;
+  try{
+    await firebase.auth().currentUser.reload();
+    if(firebase.auth().currentUser.emailVerified){
+      await handleAuthenticatedUser(firebase.auth().currentUser);
+    }else{
+      document.getElementById("verifyErr").textContent = "Your email is not verified yet. Open the link from your email, then try again.";
+    }
+  }catch(e){ document.getElementById("verifyErr").textContent = e.message || "Could not refresh verification status."; }
+  finally{ btn.disabled = false; }
+});
+document.getElementById("resendVerifyBtn").addEventListener("click", async ()=>{
+  const btn = document.getElementById("resendVerifyBtn");
+  btn.disabled = true;
+  try{
+    const profile = await getUserProfileDoc(firebase.auth().currentUser.uid) || {};
+    await sendVerificationLink(firebase.auth().currentUser, profile, false);
+    document.getElementById("verifyErr").textContent = "A new verification link was sent. Please check your inbox.";
+  }catch(e){ document.getElementById("verifyErr").textContent = e.message || "Could not send a verification link."; }
+  finally{ btn.disabled = false; }
+});
 
 document.getElementById("logoutBtn").addEventListener("click", ()=>{
   openConfirm("Log out of ATLAS?", async ()=>{
