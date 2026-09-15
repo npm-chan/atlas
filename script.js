@@ -3726,11 +3726,12 @@ const QUICK_ACTIONS = [
   { id:"create_schedule", icon:"➕", label:"Create Schedule", page:"schedule", roles:["super_admin","admin"] },
   { id:"manage_school_year", icon:"🗓️", label:"Manage School Year", page:"schoolyears", roles:["super_admin","admin"] },
   { id:"add_teacher", icon:"👨‍🏫", label:"Add Teacher", page:"teachers", open:()=>openTeacherForm(), roles:["super_admin","admin"] },
-  { id:"add_section", icon:"👨‍🎓", label:"Add Student/Section", page:"sections", open:()=>openSectionForm(), roles:["super_admin","admin"] },
+  { id:"add_section", icon:"👨‍🎓", label:"Add Section", page:"sections", open:()=>openSectionForm(), roles:["super_admin","admin"] },
   { id:"manage_learning_areas", icon:"🧭", label:"Learning Areas", page:"learningareas", roles:["super_admin","admin"] },
   { id:"manage_subjects", icon:"📚", label:"Manage Subjects", page:"subjects", roles:["super_admin","admin"] },
   { id:"teaching_loads", icon:"📋", label:"Teaching Loads", page:"teachers", roles:["super_admin","admin","teacher"] },
   { id:"bell_schedule", icon:"🕒", label:"Bell Schedule", page:"settings", roles:["super_admin","admin"] },
+  { id:"validate_schedule", icon:"✓", label:"Validate Schedule", page:"schedule", open:()=>document.getElementById("validateScheduleBtn")?.click(), roles:["super_admin","admin"] },
   { id:"view_final_schedule", icon:"📅", label:"Final Classroom Schedule", page:"finalschedule", roles:["super_admin","admin","teacher"] },
   { id:"resolve_conflicts", icon:"⚠️", label:"Schedule Conflicts", page:"conflicts", roles:["super_admin","admin"] },
   { id:"view_reports", icon:"📊", label:"View Reports", page:"reports", roles:["super_admin","admin","teacher"] },
@@ -6857,6 +6858,7 @@ firebase.auth().onAuthStateChanged(async (fbUser)=>{
       await handleAuthenticatedUser(fbUser);
     } else {
       AUTH_SESSION = null;
+      closeInstallPrompt();
       document.getElementById("appRoot").classList.remove("authed");
       document.getElementById("authScreen").style.display = "flex";
     }
@@ -7006,6 +7008,83 @@ document.getElementById("logoutBtn").addEventListener("click", ()=>{
    ========================================================= */
 const TOUR_STATE_KEY = "atlas_tour_state";
 
+let deferredInstallPrompt = null;
+let installPromptOpen = false;
+
+function isAtlasInstalled(){
+  return window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+}
+
+function updateInstallButton(){
+  const button = document.getElementById("installAppBtn");
+  if(!button) return;
+  button.style.display = isAtlasInstalled() ? "none" : "inline-flex";
+  button.disabled = !deferredInstallPrompt;
+  button.title = deferredInstallPrompt ? "Install ATLAS on this device" : "Install is available from a supported browser over HTTPS or localhost";
+}
+
+function closeInstallPrompt(){
+  installPromptOpen = false;
+  const root = document.getElementById("installPromptRoot");
+  if(root) root.innerHTML = "";
+}
+
+async function requestAtlasInstall(){
+  if(isAtlasInstalled()) return;
+  if(!deferredInstallPrompt){
+    showToast("Install is available when ATLAS is opened from a supported browser over HTTPS or localhost.", true);
+    return;
+  }
+  const promptEvent = deferredInstallPrompt;
+  deferredInstallPrompt = null;
+  updateInstallButton();
+  closeInstallPrompt();
+  await promptEvent.prompt();
+  await promptEvent.userChoice.catch(()=>null);
+}
+
+function showInstallPrompt(){
+  if(installPromptOpen || isAtlasInstalled() || !deferredInstallPrompt) return;
+  installPromptOpen = true;
+  const root = document.getElementById("installPromptRoot");
+  if(!root) return;
+  root.innerHTML = `
+    <div class="modal-backdrop" id="installAppBackdrop">
+      <div class="modal-box narrow">
+        <div class="modal-head"><h3>Install ATLAS</h3><button class="modal-close" id="installPromptClose" aria-label="Close">&times;</button></div>
+        <div class="modal-body">
+          <p style="font-size:13.5px;color:var(--ink);margin:0;">Install ATLAS on this device for a faster launch, an app icon, and a focused full-screen workspace.</p>
+        </div>
+        <div class="modal-foot">
+          <button class="btn ghost" id="installPromptLater">Later</button>
+          <button class="btn gold" id="installPromptInstall">Install ATLAS</button>
+        </div>
+      </div>
+    </div>`;
+  const close = ()=>closeInstallPrompt();
+  document.getElementById("installPromptClose").onclick = close;
+  document.getElementById("installPromptLater").onclick = close;
+  document.getElementById("installPromptInstall").onclick = requestAtlasInstall;
+}
+
+function maybeOfferInstallPrompt(){
+  if(isAtlasInstalled() || !deferredInstallPrompt) return;
+  setTimeout(showInstallPrompt, 350);
+}
+
+window.addEventListener("beforeinstallprompt", event=>{
+  event.preventDefault();
+  deferredInstallPrompt = event;
+  updateInstallButton();
+  if(typeof ATLASTour !== "undefined") ATLASTour.maybeOfferInstallPrompt();
+});
+window.addEventListener("appinstalled", ()=>{
+  deferredInstallPrompt = null;
+  closeInstallPrompt();
+  updateInstallButton();
+  showToast("ATLAS was installed on this device.");
+});
+
 const TOUR_STEPS = [
   { page:"dashboard", selector:"#statCards", title:"Dashboard Overview",
     body:["Start here. The Dashboard gives you a quick overview of faculty members, active sections, learning areas, and weekly teaching hours."] },
@@ -7044,6 +7123,15 @@ const TOUR_STEPS = [
           "Beyond the original Teacher, Section, and Teaching-Load conflicts, ATLAS now also detects Program Conflicts (a subject's Program doesn't match its section's Section Type), Teacher Shift Conflicts (every qualified teacher's AM/PM assignment conflicts with the section's Class Shift), AM/PM Shift Conflicts (a Grade 11/12 section's Class Shift doesn't fit its grade's bell configuration), and Room Conflicts (two sections double-booked into the same room at an overlapping time).",
           "Auto-Fix attempts to resolve detected conflicts by finding valid teacher assignments or schedule adjustments while respecting all of these constraints, and shows what changed afterward. Program Conflicts and AM/PM Shift Conflicts can't be fixed by reassigning a teacher, so Auto-Fix leaves those for you to resolve directly on the Subjects, Sections, or Settings pages, and they stay listed as Unsolved Conflicts in the meantime.",
           "Use \"Validate Schedule\" on the Class Schedule page any time for a full ✅/⚠️/❌ Validation Report before you rely on or share a schedule."] },
+  { page:"conflicts", selector:"#conflictTabs", title:"Conflict Filters",
+    body:["Use these tabs to switch between all conflicts, unresolved conflicts, Auto-Fix, resolved items, and the complete conflict history.",
+          "This keeps active problems separate from resolved records while preserving an audit trail."] },
+  { page:"conflicts", selector:"#changesBody", title:"Auto-Fix Changes",
+    body:["After Auto-Fix runs, review this table to see which teacher or schedule assignments changed.",
+          "You can inspect the recorded changes and undo the most recent Auto-Fix run when needed."] },
+  { page:"conflicts", selector:"#cmgmtHistoryBody", title:"Conflict History",
+    body:["Conflict History records when a problem was detected, what schedule entry it affected, and how it was resolved.",
+          "Use it when auditing or explaining why a final schedule changed."] },
   { page:"reports", selector:"#reportLoadByArea", title:"Reports",
     body:["Use Reports to review summarized information about teaching loads, faculty composition, and bell schedules — including Teaching Load by Learning Area, Regular vs Special Program Assignments, Roster Composition, and Bell Schedule Snapshot.",
           "Reports provide a convenient way to review the information configured and generated throughout ATLAS."] },
@@ -7146,7 +7234,7 @@ const ATLASTour = (function(){
     const r = root();
     if(!r) return;
     const rect = el.getBoundingClientRect();
-    const pad = 6;
+    const pad = 0;
     let highlight = r.querySelector(".tour-highlight");
     if(!highlight){
       highlight = document.createElement("div");
@@ -7157,7 +7245,7 @@ const ATLASTour = (function(){
     highlight.style.left = Math.max(rect.left - pad, 4) + "px";
     highlight.style.width = (rect.width + pad*2) + "px";
     highlight.style.height = (rect.height + pad*2) + "px";
-    requestAnimationFrame(()=> highlight.classList.add("show"));
+    highlight.classList.add("show");
 
     const card = r.querySelector(".tour-card");
     if(card){
@@ -7235,7 +7323,7 @@ const ATLASTour = (function(){
   function nextStep(){ showStep(idx+1); }
   function previousStep(){ showStep(idx-1); }
 
-  function skipTour(){ teardown(); saveTourState("skipped"); }
+  function skipTour(){ teardown(); saveTourState("skipped"); maybeOfferInstallPrompt(); }
 
   function finishTour(){ teardown(); saveTourState("completed"); showCompletionScreen(); }
 
@@ -7255,7 +7343,7 @@ const ATLASTour = (function(){
         </div>
       </div>`;
     const close = ()=>{ r.innerHTML = ""; };
-    document.getElementById("tourDoneFinish").onclick = close;
+    document.getElementById("tourDoneFinish").onclick = ()=>{ close(); maybeOfferInstallPrompt(); };
     document.getElementById("tourDoneRestartLater").onclick = close;
   }
 
@@ -7279,7 +7367,7 @@ const ATLASTour = (function(){
         </div>
       </div>`;
     document.getElementById("tourWelcomeStart").onclick = ()=>{ r.innerHTML=""; startTour(); };
-    document.getElementById("tourWelcomeSkip").onclick = ()=>{ r.innerHTML=""; saveTourState("skipped"); };
+    document.getElementById("tourWelcomeSkip").onclick = ()=>{ r.innerHTML=""; saveTourState("skipped"); maybeOfferInstallPrompt(); };
     // "Maybe Later" intentionally saves no state, so the welcome screen is offered again next login.
     document.getElementById("tourWelcomeLater").onclick = ()=>{ r.innerHTML=""; };
   }
@@ -7300,12 +7388,21 @@ const ATLASTour = (function(){
   async function maybeOfferOnLogin(){
     const state = await loadTourState();
     if(!state || (state.status !== "completed" && state.status !== "skipped")) showWelcome();
+    else maybeOfferInstallPrompt();
   }
 
-  return { startTour, nextStep, previousStep, skipTour, finishTour, restartTour, showStep, saveTourState, loadTourState, maybeOfferOnLogin };
+  function maybeOfferInstallPrompt(){ window.maybeOfferInstallPrompt(); }
+
+  return { startTour, nextStep, previousStep, skipTour, finishTour, restartTour, showStep, saveTourState, loadTourState, maybeOfferOnLogin, maybeOfferInstallPrompt };
 })();
 
 document.getElementById("startGuidedTourBtn").addEventListener("click", ()=> ATLASTour.restartTour());
+document.getElementById("installAppBtn").addEventListener("click", requestAtlasInstall);
+updateInstallButton();
+
+if("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")){
+  window.addEventListener("load", ()=>navigator.serviceWorker.register("./sw.js").catch(error=>console.warn("ATLAS service worker registration failed:", error)));
+}
 
 // No separate bootstrap step needed here: firebase.auth().onAuthStateChanged
 // (registered up in the AUTHENTICATION section) fires once immediately with
