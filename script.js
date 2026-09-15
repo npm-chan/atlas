@@ -3697,7 +3697,7 @@ window.addEventListener("scroll", ()=>{
   const scrollingDown = currentScrollY > lastScrollY + 4;
   const scrollingUp = currentScrollY < lastScrollY - 4;
   lastScrollY = currentScrollY;
-  if(!appRoot || window.innerWidth > 900 || appRoot.classList.contains("sidebar-open")) return;
+  if(!appRoot || appRoot.classList.contains("sidebar-open")) return;
   clearTimeout(topbarShowTimer);
   if(scrollingDown && currentScrollY > 24){
     appRoot.classList.add("topbar-hidden");
@@ -3743,7 +3743,7 @@ function renderQuickActions(){
     wrap.innerHTML = `<div class="qa-empty">No quick actions are available for the ${ROLE_LABEL[CURRENT_ROLE]} role.</div>`;
     return;
   }
-  wrap.innerHTML = visible.map(a=>`<button type="button" class="qa-btn" data-action="${a.id}"><span class="qa-icon">${a.icon}</span><span class="qa-label">${a.label}</span></button>`).join("");
+  wrap.innerHTML = visible.map(a=>`<button type="button" class="qa-btn" data-action="${a.id}" data-tour="quick-action-${a.id}"><span class="qa-icon">${a.icon}</span><span class="qa-label">${a.label}</span></button>`).join("");
   wrap.querySelectorAll(".qa-btn").forEach(btn=>{
     const action = QUICK_ACTIONS.find(a=>a.id===btn.dataset.action);
     btn.addEventListener("click", ()=> navigateTo(action.page, { then: action.open }));
@@ -7007,49 +7007,60 @@ document.getElementById("logoutBtn").addEventListener("click", ()=>{
 const TOUR_STATE_KEY = "atlas_tour_state";
 
 const TOUR_STEPS = [
-  { page:"dashboard", selector:'[data-tour="dashboard"]', title:"Dashboard",
+  { page:"dashboard", selector:"#statCards", title:"Dashboard Overview",
     body:["Start here. The Dashboard gives you a quick overview of faculty members, active sections, learning areas, and weekly teaching hours."] },
-  { page:"dashboard", selector:'[data-tour="quick-actions"]', title:"Quick Actions",
+  { page:"dashboard", selector:"#quickActions", title:"Quick Actions",
     body:["Quick Actions are shortcuts to commonly used tasks — creating a schedule, adding a teacher or section, generating subjects, and more. Only actions you're authorized for appear here."] },
-  { page:"schoolyears", selector:'[data-tour="school-years"]', title:"School Year & Terms",
+  { page:"schoolyears", selector:"#addSchoolYearBtn", title:"School Year & Terms",
     body:["Use this section to create, activate, archive, and select the School Year and Term that ATLAS uses throughout the system.",
           "The School Year and Term you select here affect every downstream module — Subjects, Teaching Load, Sections, and Class Scheduling."] },
-  { page:"teachers", selector:'[data-tour="teachers"]', title:"Teachers & Loads",
+  { page:"teachers", selector:"#addTeacherBtn", title:"Teachers & Loads",
     body:["Manage your faculty roster, teacher specializations, grade levels taught, and weekly teaching loads here. Teacher information matters for schedule generation.",
           "Select the grade levels a teacher is qualified to teach — a teacher should only be assigned to appropriate grade levels unless they also have specialized subject assignments.",
           "For a teacher assigned to Grade 11 or Grade 12, you can also set that grade's Class Shift — AM, PM, or No Shift. A teacher set to AM or PM will never be scheduled against a section on the opposite shift; \"No Shift\" means the teacher can take either.",
           "Open a teacher's details to see their Teaching Load by Program — how many classes, subjects, and hours/week they're actually carrying, split Regular vs Special Program, per grade level."] },
-  { page:"learningareas", selector:'[data-tour="learning-areas"]', title:"Specializations & Learning Areas",
+  { page:"learningareas", selector:"#addLearningAreaBtn", title:"Specializations & Learning Areas",
     body:["This is the shared master list behind two things: the Specializations a teacher can be tagged with on the Teachers page, and the Learning Area a Subject can be explicitly assigned to on the Subjects page. A teacher automatically qualifies for a subject whenever a tagged specialization matches that subject's Learning Area.",
           "Add, rename, archive, or delete entries here. Archiving hides an item from new assignments without breaking anything already using it. Deleting one that's still in use warns you first and lets you Cancel, Archive Instead, or Delete with an optional reassignment to another area."] },
-  { page:"subjects", selector:'[data-tour="subjects"]', title:"Subjects",
+  { page:"subjects", selector:"#addSubjectBtn", title:"Subjects",
     body:["Subjects are the school's primary academic reference — generate and manage the learning areas for each Grade Level directly here, scoped to the selected School Year and Term. Use the grade summary at the top to jump straight to a grade level.",
           "Before generating a schedule, make sure the subjects offered for the current School Year and Term are correctly configured.",
           "Each subject also has a Program — Regular or Special Program. A subject's Program must match the Section Type of any section it's scheduled to; ATLAS reports a Program Conflict instead of silently assigning a subject to the wrong kind of section.",
           "Schedule Days now has three options — Monday to Thursday, Monday to Friday, or Friday Only — so a subject can be excluded from Friday specifically, included on Friday, or scheduled on Friday exclusively. You can also explicitly assign a subject to a Learning Area instead of relying on ATLAS's automatic guess."] },
-  { page:"sections", selector:'[data-tour="sections"]', title:"Sections",
+  { page:"sections", selector:"#addSectionBtn", title:"Sections",
     body:["Create and manage class sections, advisers, grade levels, and section-related information.",
           "Sections are the classes that will receive subjects, teachers, and schedules.",
           "Every section has a Section Type — Regular or Special Program — which is matched against each Subject's Program during scheduling. Grade 11 and Grade 12 sections also have a Class Shift (AM Class, PM Class, or None) so a school can run a Senior High morning shift and afternoon shift side by side, sharing teachers and rooms without double-booking either."] },
-  { page:"schedule", selector:'[data-tour="schedule"]', title:"Class Schedule",
+  { page:"schedule", selector:"#genScheduleBtnSchedule", title:"Class Schedule",
     body:["This is where ATLAS generates and manages the class timetable for your sections, using the configured subjects, teachers, sections, teaching loads, and bell schedule.",
           "Administrators can manually edit or add schedule entries without removing the automated scheduling workflow. Friday can be enabled or disabled for automatic generation in Admin Settings — manual Friday entries can still be added when Friday auto-generation is off.",
           "For Grade 11/12 AM/PM Class sections and Special Program sections, the generator automatically respects each section's Class Shift and Section Type — you don't need to schedule those constraints by hand.",
           "Generating now lets you choose exactly which Grade Levels to (re)generate — every other grade's saved schedule is left untouched — and a one-time Monday–Thursday or Monday–Friday override for just that run, without changing your saved Friday Schedule setting."] },
-  { page:"conflicts", selector:'[data-tour="conflicts"]', title:"Schedule Conflicts", important:true,
+  { page:"finalschedule", selector:"#fsPrintAllBtn", title:"Final Classroom Schedule",
+    body:["Use the Final Classroom Schedule to review the consolidated schedule that is ready to share with teachers, sections, and school administrators.",
+          "You can print the full schedule, download it as Excel, audit changes, re-validate entries, and use Edit Final Schedule when a finalized entry needs a controlled adjustment."] },
+  { page:"conflicts", selector:"#autoFixBtnSchedule", title:"Schedule Conflicts", important:true,
     body:["Schedule Conflicts is a separate management area designed to detect, review, resolve, and track scheduling conflicts. This module is separate from Class Schedule — it does not interfere with the normal Class Schedule interface or its edits.",
           "Beyond the original Teacher, Section, and Teaching-Load conflicts, ATLAS now also detects Program Conflicts (a subject's Program doesn't match its section's Section Type), Teacher Shift Conflicts (every qualified teacher's AM/PM assignment conflicts with the section's Class Shift), AM/PM Shift Conflicts (a Grade 11/12 section's Class Shift doesn't fit its grade's bell configuration), and Room Conflicts (two sections double-booked into the same room at an overlapping time).",
           "Auto-Fix attempts to resolve detected conflicts by finding valid teacher assignments or schedule adjustments while respecting all of these constraints, and shows what changed afterward. Program Conflicts and AM/PM Shift Conflicts can't be fixed by reassigning a teacher, so Auto-Fix leaves those for you to resolve directly on the Subjects, Sections, or Settings pages, and they stay listed as Unsolved Conflicts in the meantime.",
           "Use \"Validate Schedule\" on the Class Schedule page any time for a full ✅/⚠️/❌ Validation Report before you rely on or share a schedule."] },
-  { page:"reports", selector:'[data-tour="reports"]', title:"Reports",
+  { page:"reports", selector:"#reportLoadByArea", title:"Reports",
     body:["Use Reports to review summarized information about teaching loads, faculty composition, and bell schedules — including Teaching Load by Learning Area, Regular vs Special Program Assignments, Roster Composition, and Bell Schedule Snapshot.",
           "Reports provide a convenient way to review the information configured and generated throughout ATLAS."] },
-  { page:"database", selector:'[data-tour="database"]', title:"Database & Sync",
+  { page:"database", selector:"#syncNowBtn", title:"Database & Sync",
     body:["Database & Sync lets you monitor stored application data, synchronization status, backups, exports, and restore options.",
           "ATLAS stores application data locally and can synchronize supported records with the configured cloud database."] },
-  { page:"settings", selector:'[data-tour="settings"]', title:"Admin Settings",
+  { page:"settings", selector:"#saveSettings", title:"Admin Settings",
     body:["Admin Settings controls important school-wide scheduling configuration: school start time, grade-level bell schedules, class periods, breaks, lunch, and the Friday schedule.",
           "Configure these settings carefully — the bell schedule is used when generating class schedules."] },
+  { page:"settings", selector:"#saveSchoolName", title:"School Identity",
+    body:["Set the school's official name and upload its logo. These details appear on the Final Classroom Schedule and printed schedules."] },
+  { page:"settings", selector:"#saveSettings", title:"Bell Configuration",
+    body:["Configure each grade level's start time, periods per day, period length, breaks, lunch, and dismissal timing, then save and regenerate schedules."] },
+  { page:"settings", selector:"#saveScheduleSettings", title:"Schedule Settings",
+    body:["Control Friday availability, Senior High shift timing, and per-subject duration overrides. Save these rules before regenerating the class schedule."] },
+  { page:"settings", selector:"#settingsGoDbBtn", title:"Application Data & Backup",
+    body:["Open Database & Sync to inspect stored records, synchronize cloud data, export a full JSON backup, or restore a previous backup."] },
   { page:"settings", selector:'[data-tour="shs-shift"]', title:"Senior High AM/PM Shift Settings",
     body:["If your school runs Grade 11/12 in two shifts, set the clock time here that the PM Class shift starts at. PM Class sections build their whole bell schedule from this time instead of the grade's normal start time, so an AM Class section and a PM Class section can safely share the same room, day, and even the same teachers.",
           "This works together with each grade's Class Start Time in the Per-Grade-Level Bell Configuration table above: an AM Class section is only valid if that grade's Class Start Time falls before this PM boundary. If it doesn't, ATLAS reports it as an AM/PM Shift Conflict on the Schedule Conflicts page instead of generating an invalid schedule."] }
@@ -7089,6 +7100,7 @@ const ATLASTour = (function(){
 
   function teardown(){
     active = false;
+    closeTourDrawer();
     const r = root();
     if(r) r.innerHTML = "";
     if(resizeHandler){
@@ -7110,13 +7122,23 @@ const ATLASTour = (function(){
     return !!document.querySelector('.navlist button[data-page="'+page+'"]');
   }
 
+  function openTourDrawer(){
+    const app = document.getElementById("appRoot");
+    if(app) app.classList.add("sidebar-open");
+  }
+
+  function closeTourDrawer(){
+    const app = document.getElementById("appRoot");
+    if(app) app.classList.remove("sidebar-open");
+  }
+
   // Step 19 requirement: verify the nav item exists, the user can access
   // the page, and only then treat the step as showable. canAccessPage()
   // is the app's existing authorization check — reused as-is, never
   // duplicated, so the tour always respects real permissions.
   function targetAvailable(step){
     if(step.page && typeof canAccessPage === "function" && !canAccessPage(step.page)) return false;
-    if(step.page && !navExists(step.page)) return false;
+    if(step.page && !navExists(step.page) && !document.getElementById("page-"+step.page)) return false;
     return true;
   }
 
@@ -7124,7 +7146,7 @@ const ATLASTour = (function(){
     const r = root();
     if(!r) return;
     const rect = el.getBoundingClientRect();
-    const pad = 8;
+    const pad = 6;
     let highlight = r.querySelector(".tour-highlight");
     if(!highlight){
       highlight = document.createElement("div");
@@ -7264,6 +7286,7 @@ const ATLASTour = (function(){
 
   function startTour(){
     active = true;
+    closeTourDrawer();
     document.addEventListener("keydown", onKeydown);
     showStep(0);
   }
